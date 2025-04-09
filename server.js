@@ -1,8 +1,10 @@
 import 'dotenv/config';
 import Discord, { GatewayIntentBits } from 'discord.js';
 import fetch from 'node-fetch';
-import { MongoClient } from 'mongodb';
+import { Sequelize, DataTypes } from 'sequelize';  // Import Sequelize
 import { setTimeout } from 'timers/promises';
+import { Reaction as ReactionModel } from './models/reaction.js'; // Import models
+import { Post as PostModel } from './models/post.js';
 
 const discordClient = new Discord.Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
@@ -11,29 +13,26 @@ const discordClient = new Discord.Client({
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 const LINKEDIN_API_KEY = process.env.LINKEDIN_API_KEY;
-const LINKEDIN_USER_ID = process.env.LINKEDIN_USER_ID; // Add this to .env (user or org ID)
-const LINKEDIN_ENTITY_TYPE = process.env.LINKEDIN_ENTITY_TYPE || 'PERSON'; // 'PERSON' or 'ORGANIZATION'
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017';
-const MONGODB_DBNAME = process.env.MONGODB_DBNAME || 'linkedinReactions';
+const LINKEDIN_USER_ID = process.env.LINKEDIN_USER_ID;
+const LINKEDIN_ENTITY_TYPE = process.env.LINKEDIN_ENTITY_TYPE || 'PERSON';
 
-let db;
+// Sequelize setup
+const sequelize = new Sequelize({
+    dialect: 'sqlite',
+    storage: 'database.sqlite', // Ensure this matches your config
+    logging: false,  // Disable logging for cleaner output
+});
 
-async function connectToDatabase() {
-    const client = new MongoClient(MONGODB_URI);
+// Initialize models
+const Reaction = ReactionModel(sequelize);
+const Post = PostModel(sequelize);
 
-    try {
-        await client.connect();
-        console.log('Connected to MongoDB');
-        db = client.db(MONGODB_DBNAME);
-    } catch (error) {
-        console.error('Error connecting to MongoDB:', error);
-        process.exit(1);
-    }
-}
+//Optionally create db on app start
+//await sequelize.sync({ force: true });
 
 async function getLinkedInPostsToTrack() {
     const entityId = LINKEDIN_USER_ID;
-    const entityType = LINKEDIN_ENTITY_TYPE; // 'PERSON' or 'ORGANIZATION'
+    const entityType = LINKEDIN_ENTITY_TYPE;
 
     if (!entityId) {
         console.warn('LINKEDIN_USER_ID not set.  Tracking no posts.');
@@ -46,12 +45,11 @@ async function getLinkedInPostsToTrack() {
 }
 
 async function fetchLinkedInEntityPosts(entityId, entityType) {
-    //LinkedIn API endpoint to fetch posts from a user or organization
     let apiUrl;
     if (entityType === 'PERSON') {
-        apiUrl = `https://api.linkedin.com/v2/posts?author=urn:li:person:${entityId}&count=20`;  // Adjust count as needed
+        apiUrl = `https://api.linkedin.com/v2/posts?author=urn:li:person:${entityId}&count=20`;
     } else if (entityType === 'ORGANIZATION') {
-        apiUrl = `https://api.linkedin.com/v2/posts?author=urn:li:organization:${entityId}&count=20`; // Adjust count as needed
+        apiUrl = `https://api.linkedin.com/v2/posts?author=urn:li:organization:${entityId}&count=20`;
     } else {
         console.error('Invalid LINKEDIN_ENTITY_TYPE.  Must be PERSON or ORGANIZATION');
         return [];
@@ -113,19 +111,24 @@ async function processReactions(postId, reactions) {
         return;
     }
 
-    const reactionsCollection = db.collection('reactions');
-
     for (const reaction of reactions) {
         const reactionId = reaction.id;
-        const existingReaction = await reactionsCollection.findOne({ reactionId: reactionId });
+
+        //Check if the reaction already exists in the DB
+        const existingReaction = await Reaction.findByPk(reactionId);
 
         if (!existingReaction) {
             await postToDiscord(reaction, postId);
-            await reactionsCollection.insertOne({
-                reactionId: reactionId,
-                postId: postId,
-                timestamp: new Date(),
-            });
+
+            try {
+                await Reaction.create({
+                    reactionId: reactionId,
+                    postId: postId,
+                    timestamp: new Date(),
+                });
+            } catch (error) {
+                console.error('Error creating reaction in database:', error);
+            }
         }
     }
 }
@@ -175,7 +178,13 @@ async function main() {
 
 discordClient.on('ready', async () => {
     console.log(`Logged in as ${discordClient.user.tag}!`);
-    await connectToDatabase();
+    try {
+        await sequelize.authenticate();
+        console.log('Connection has been established successfully.');
+        await sequelize.sync(); // This creates the table if it doesn't exist (and does nothing if it already exists)
+    } catch (error) {
+        console.error('Unable to connect to the database:', error);
+    }
 
     setInterval(main, 60000);
 });
