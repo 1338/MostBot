@@ -1,0 +1,23 @@
+{
+  "name": "mostbot",
+  "version": "0.0.1",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1338/MostBot.git"
+  },
+  "author": "1338",
+  "license": "Beerware",
+  "bugs": {
+    "url": "https://github.com/1338/MostBot/issues"
+  },
+  "homepage": "https://github.com/1338/MostBot#readme",
+  "description": "",
+  "dependencies": {
+    "discord.js": "^14.18.0"
+  }
+}
